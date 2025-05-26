@@ -1,24 +1,17 @@
-import process from 'process';
-import { google } from 'googleapis';
-import { Base64 } from 'js-base64';
-import dotenv from 'dotenv';
+const process = require('process');
+const { google } = require('googleapis');
+const { Base64 } = require('js-base64');
+const dotenv = require('dotenv');
 dotenv.config();
-import express from 'express';
-import cors from 'cors';
-import session from 'express-session';
+const express = require('express');
+const cors = require('cors');
+const { auth } = require('google-auth-library');
+const port = 4001;
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(session({
-  secret: 'your_secret_key',
-  saveUninitialized: true, 
-  resave: false,
-  cookie: {
-    secure: false, // Set to true if using HTTPS
-    maxAge: 24 * 60 * 60 * 1000 // 1 day
-  }
-}));
+
 
 const oAuth2Client = new google.auth.OAuth2(
   process.env.GMAIL_ID,
@@ -26,11 +19,13 @@ const oAuth2Client = new google.auth.OAuth2(
   process.env.GMAIL_REDIRECT_URI
 );
 
+
 app.get('/', async (req, res) => {
   const authUrl = oAuth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: ['https://www.googleapis.com/auth/gmail.compose'],
+  access_type: 'offline',
+  scope: ['https://www.googleapis.com/auth/gmail.compose'],
   });
+  
   res.redirect(authUrl);
 }
 );
@@ -40,8 +35,14 @@ app.get('/callback_url', async (req, res) => {
   try {
     const { tokens } = await oAuth2Client.getToken(code);
     oAuth2Client.setCredentials(tokens);
-    req.session.classroomTokens = tokens;
-    res.status(200).send('Authorization successful! You can close this window.');
+    console.log(tokens)
+    await fetch('http://localhost:3000/token-receiver', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tokens),
+    });
+
+    res.send('Tokens sent to AI agent. You can close this window now.');
   } catch (error) {
     console.error('Error retrieving access token', error);
     res.status(500).send('Error retrieving access token');
@@ -50,9 +51,10 @@ app.get('/callback_url', async (req, res) => {
 );
 
 app.post('/createDraft', async (req, res) => {
-  const { to, from, subject, body } = req.body;
+  console.log('inside createDraft')
+  console.log(req.body)
+  const { tokens, to, from, subject, body } = req.body;
   try {
-    const tokens = req.session.classroomTokens;
     if (!tokens) {
       return res.status(401).send('Unauthorized: No tokens found');
     }
@@ -66,9 +68,8 @@ app.post('/createDraft', async (req, res) => {
 }
 );
 app.post('/sendDraft', async (req, res) => {
-  const { draftId } = req.body;
+  const { tokens, draftId } = req.body;
   try {
-    const tokens = req.session.classroomTokens;
     if (!tokens) {
       return res.status(401).send('Unauthorized: No tokens found');
     }
@@ -83,7 +84,7 @@ app.post('/sendDraft', async (req, res) => {
 );
 
 
-async function createDraft(to, from, subject, body) {
+async function createDraft(auth, to, from, subject, body) {
   const gmail = google.gmail({ version: 'v1', auth });
   console.log(auth,to,from,subject, body)
   const rawMessage = [
@@ -135,3 +136,4 @@ async function sendDraft(auth, draftId) {
 app.listen(4001, () => {
   console.log('Server is running on port 4001');
 });
+
